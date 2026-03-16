@@ -1,0 +1,929 @@
+{
+  "name": "Zoho Invoice",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "=You are an AI data extractor for Telegram-based invoice automation.\nYour task is to read natural-language messages, identify invoice intent, extract structured invoice data, separate adult/kids into distinct items if provided, enforce mandatory fields, handle customer lookup via tools, and return clean valid JSON for further processing.\n\nYou must always return ONLY JSON—no extra text.\nFor every case make use of both the tools without fail!\n\nSTEP 1 — INTENT DETECTION\nIf the message contains invoice, booking, quotation, order, customer info, adult/kids counts, prices, totals, or payment-related details → proceed to STEP 2.\n\nIf unrelated (greetings, questions, general chat), return:\n{\n  \"status\": \"incomplete\",\n  \"message\": \"I am an automation agent for invoice processing. Please provide invoice or booking details.\"\n}\n\nIf the user says “cancel”, “ignore”, “stop”, “not invoice”, return:\n{\n  \"status\": \"incomplete\",\n  \"message\": \"Invoice creation cancelled or not applicable.\"\n}\n\nSTEP 2 — CONFIRMATION LOGIC\nIf the previous system message had \"status\": \"confirmation\":\n\nIf user confirms (Yes / OK / Confirm / 👍):\n→ Skip extraction and output the final completed JSON (Case C).\n\nIf user provides corrections:\n→ Re-extract data, merge changes into previous data, and continue normally.\n\nSTEP 2 — DATA EXTRACTION RULES\nThe output must follow this schema.\n\nROOT FIELDS\nclient_name (mandatory): The customer or company name extracted from message. If missing → return \"status\": \"incomplete\" asking for it.\n\ncustomer_id: must ALWAYS be present at final stage\n  To obtain it:\n    Use 'Get Customer ID' tool to search for the customer.\n    If found → extract customer_id.\n    If NOT found → use 'Create Customer ID' tool and extract new customer_id.\n  customer_id can NEVER be empty at confirmation or completion stage.\nAlwaya use \"Get Customer ID\" and \"Create Customer ID\" tools to fetch the customer id.\n\nreference_number (mandatory): Extract the reference number from message. If missing → request from user.\n\ndiscount (mandatory): If discount is mentioned, extract the value. If not mentioned → default to 0.\n\ncreated_date:  Use the system date:\n{{ new Date().toDateTime().format('yyyy-MM-dd') }}. Output format: DD Month YYYY.\n\ndue_date (mandatory): Extract due date from message. If missing → request from user.\n\nITEM HANDLING\nIf the tour/service mentions only people, group of people or realted then no need to separate them into adults & kids.\nIf a single tour/service mentions adults & kids, create two separate items and the description should list whether for adults or kids:\n\n<Tour Name> (Adults)\n<Tour Name> (Kids)\n\nIf multiple tours/services are mentioned, create separate item groups.\n\nItem Schema:\nEach item must follow:\n{\n  \"item_no\": 1,\n  \"item_name\": \"\",\n  \"description\": \"\",\n  \"count\": 0,\n  \"unit_price\": 0,\n}\n\nIf unit price for ANY item is missing → return \"status\": \"incomplete\" asking specifically for missing prices.\n\ninvoice_subject: Generate a brief summary of the invoice based on message by yourself.\n\nSTEP 3 — Output Logic\nCase A — All Mandatory Fields Present (Needs Confirmation)\n\nReturn:\n{\n  \"status\": \"confirmation\",\n  \"message\": \"Please confirm the following invoice details before final creation:\",\n  \"invoice_subject\": \"\",\n  \"client_name\": \"\",\n  \"reference_number\": \"\",\n  \"discount\": \"\",\n  \"due_date\": \"\",\n  \"items\": [\n    {\n      \"item_no\": 1,\n      \"item_name\": \"\",\n      \"description\": \"\",\n      \"count\": 0,\n      \"unit_price\": 0\n    }\n  ]\n}\n(Add multiple items as required.)\n\nCase B — Missing Required Fields\nReturn:\n\n{\n  \"status\": \"incomplete\",\n  \"missing_fields\": [\"list_missing_fields_here\"],\n  \"message\": \"To complete the invoice, please provide the missing details:\"\n}\n\nCase C — Final Confirmation\n\nIf the user confirms after a confirmation message, return:\n{\n  \"status\": \"complete\",\n  \"invoice_subject\": \"\",\n  \"client_name\": \"\",\n  \"customer_id\": \"\",\n  \"reference_number\": \"\",\n  \"discount\": \"\",\n  \"due_date\": \"\",\n  \"items\": [\n    {\n      \"item_no\": 1,\n      \"item_name\": \"\",\n      \"description\": \"\",\n      \"count\": 0,\n      \"unit_price\": 0\n    }\n  ]\n}\n(Add multiple items as needed.)\n\nSTEP 4 — Behavioral Rules\nAlways output pure JSON, no explanations.\nAuto-merge corrections from the user.\nDates must be normalized as DD-MM-YYYY for backend use.\nNever guess values not present in message.\nAdults/Kids must always create separate invoice line items.\nMultiple tours/services → multiple item groups.\nIf totals conflict, request clarification.\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -1776,
+        880
+      ],
+      "id": "f809c438-aff7-4f65-8570-4050b9fec4fe",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.from.id }}",
+        "contextWindowLength": 8
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -1776,
+        1088
+      ],
+      "id": "ebc9d120-2424-4046-834d-c95d7aa5d2e1",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the raw output from the previous node (AI Agent)\nlet raw = $json[\"output\"];\n\n// Step 1: Remove code fences (```json ... ```)\nraw = raw.replace(/```json/i, \"\").replace(/```/g, \"\");\n\n// Step 2: Clean escaped newlines and extra spaces\nraw = raw.replace(/\\\\n/g, \"\").trim();\n\n// Step 3: Parse the cleaned JSON safely\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"Failed to parse AI JSON output: \" + e.message + \"\\nRaw content: \" + raw);\n}\n\n// Step 4: Return structured data for next nodes\nreturn parsed;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        880
+      ],
+      "id": "14bc8ab1-a068-446d-91a5-f73c26879aeb",
+      "name": "Parses AI Output"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message.voice.file_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "id": "aea8061f-77c7-402d-88f5-ba14b016a426"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Voice Message"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "397cf54a-fa95-4f43-8071-a88de15e8c8d",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Text Message"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -2656,
+        864
+      ],
+      "id": "0aca5b28-238a-43ac-8f7d-37f9d05e97a6",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status.toLowerCase() }}",
+                    "rightValue": "incomplete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "f5af7d8f-1662-45bb-b2c2-a8af405a70df"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Incomplete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "97ff3a37-6e72-4e71-8fbc-7a88fba07976",
+                    "leftValue": "={{ $json.status.toLowerCase() }}",
+                    "rightValue": "confirmation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Confirmation"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ac6943ed-45da-4feb-a6dc-5631edd0ba3b",
+                    "leftValue": "={{ $json.status.toLowerCase() }}",
+                    "rightValue": "complete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Complete"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1248,
+        864
+      ],
+      "id": "84ae69aa-4463-4be4-9340-1c7ae8d85a05",
+      "name": "Details-based Routing1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.fromID }}",
+        "text": "={{ $json.message }}\n\n{{ $json.missing_fields.map(field => `• ${field}`).join(\"\\n\") }}\n",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        544
+      ],
+      "id": "d6777fc1-84c1-4114-87c9-1bd980c86226",
+      "name": "Send a text message3",
+      "webhookId": "1f617911-aa36-4b81-8f41-713eec1bab6b",
+      "credentials": {
+        "telegramApi": {
+          "id": "p4GWqpFCRLzIs0cf",
+          "name": "Invoice Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Message: {{ $json.message }}\n\nSubject: {{ $json.invoice_subject }}\nClient Name: {{ $json.client_name }}\nReference Number: {{ $json.reference_number }}\nDiscount: {{ $json.discount }}\nDue Date: {{ $json.due_date }}\n\nItem(s) Details:\n{{ $json.items.map(item => \n`• Item No: ${item.item_no}\n  Item Name: ${item.item_name}\n  Description: ${item.description}\n  Count: ${item.count}\n  Unit Price: QAR ${item.unit_price}`\n).join(\"\\n\\n\") }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a professional data analyzer and output generator.\nYour core task is to go through the all input fields and generate an message ready to be send directly to telegram.\n\nAdjust the message according to the number of itmes present in the invoice details.\n\nTemplate message for telegram:\n\n{{ $json.message }}\n\nInvoice Subject: \" \"\nClient: \" \"\nReference Number: \" \"\nDiscount: {{ $json.discount }} QAR\nDue Dtae: \"\"\n\nItem No: \"\"\n      Item Name: \"\"\n      Description: \"\"\n      Count: \"Count\" (\"unit price for each\" QAR each)\n      Total Amount: \"\" QAR\n\nItem No: \"\"\n      Item Name: \"\"\n      Description: \"\"\n      Count: \"Count\" (\"unit price for each\" QAR each)\n      Total Amount: \"\" QAR\n\nGrand Total: (Sum up the total amounts from every itemand subtract the discount) QAR"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -880,
+        880
+      ],
+      "id": "8ec5fbb1-4a03-48f0-9174-41723486381d",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        880
+      ],
+      "id": "2c6c6c27-bdae-45fa-995a-4b568174cb98",
+      "name": "Send a text message1",
+      "webhookId": "1f617911-aa36-4b81-8f41-713eec1bab6b",
+      "credentials": {
+        "telegramApi": {
+          "id": "p4GWqpFCRLzIs0cf",
+          "name": "Invoice Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "=The Invoice has been created successfully!!\n✅✅\n\nSubject: {{ $('Details-based Routing1').item.json.invoice_subject }}\nClient Name: {{ $('Details-based Routing1').item.json.client_name }}\nReference Number: {{ $json.invoice.reference_number }}\n\nCreation Date: {{ $json.invoice.date.toDateTime().format('dd-MM-yyyy') }}\nDue Date: {{ $('Details-based Routing1').item.json.due_date }}\n\nSubTotal: QAR {{ $json.invoice.sub_total }}\nDiscount: QAR {{ $json.invoice.discount_total }}\nTotal Amount: QAR {{ $json.invoice.total }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -384,
+        1264
+      ],
+      "id": "35540c7d-19d8-4c7e-a521-d75e4c748438",
+      "name": "Send a text message",
+      "webhookId": "1f617911-aa36-4b81-8f41-713eec1bab6b",
+      "credentials": {
+        "telegramApi": {
+          "id": "p4GWqpFCRLzIs0cf",
+          "name": "Invoice Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "30f8a290-0d22-4dcd-be8b-bdc0b6fad749",
+              "name": "fromID",
+              "value": "={{ $('Telegram Trigger').item.json.message.from.id }}",
+              "type": "number"
+            },
+            {
+              "id": "e2a5cfc2-2967-4866-99ea-5da8b1c31dd8",
+              "name": "message",
+              "value": "={{ $json.message.trimEnd() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -896,
+        544
+      ],
+      "id": "b431a54b-6960-43a5-8e25-c58c3bf5363d",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2848,
+        864
+      ],
+      "id": "ff6f7648-62c0-4e7f-b048-6ed4bc4737a1",
+      "name": "Telegram Trigger",
+      "webhookId": "d6e77b4f-3e91-421f-a1b4-94c1bc803961",
+      "credentials": {
+        "telegramApi": {
+          "id": "p4GWqpFCRLzIs0cf",
+          "name": "Invoice Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2432,
+        688
+      ],
+      "id": "15580398-466c-4eb9-b0d2-b86e30581cc7",
+      "name": "Get a file1",
+      "webhookId": "7e94557f-d146-49f6-a72c-cb0c1353597c",
+      "credentials": {
+        "telegramApi": {
+          "id": "p4GWqpFCRLzIs0cf",
+          "name": "Invoice Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6a16bbd1-efed-40e2-81c0-c63d124e8b25",
+              "name": "=text",
+              "value": "={{ $json.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2224,
+        880
+      ],
+      "id": "d7d65a9c-a0d8-4a03-8564-ea00360c40d1",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "51eb49c2-15c3-4d09-ad99-276e931dd95b",
+              "name": "text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2016,
+        688
+      ],
+      "id": "f812bce4-e6f9-49ec-8937-86415653d1c0",
+      "name": "Edit Fields4"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -2224,
+        688
+      ],
+      "id": "4e52e976-80cc-4adc-be8c-491a1706c0fb",
+      "name": "Transcribe a recording1",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1920,
+        1088
+      ],
+      "id": "be143d7c-571b-41eb-9e96-6262179144e0",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        1024
+      ],
+      "id": "de9e3a2d-55e2-4695-b68d-b43c48297141",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Subject: INVOICE-{{ $json.invoice_subject }}\nClient Name: {{ $json.client_name }}\nCustomer Id: {{ $json.customer_id }}\nDiscount: {{ $json.discount }}\nCreated Date: {{ new Date().toDateTime().format('yyyy-MM-dd') }}\nDue Date: {{ $json.due_date }}\nReference Number: {{ $json.reference_number }}\n\nItem(s) Details:\n{{ $json.items.map(item => \n`• Item No: ${item.item_no}\n  Item Name: ${item.item_name}\n  Description: ${item.description}\n  Total Count: ${item.count}\n  Unit Price: ${item.unit_price}`\n).join(\"\\n\\n\") }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a professional data analyzer and output generator.\nYour core task is to go through the all input fields and generate a JSON Body that is ready to be send directly to make a http request.\n\nAdjust the JSON Body according to the number of itmes present in the invoice details.\n\nInput the dates in format: YYYY-MM-DD\n\nIf the discount exists, that is it is not 0 (zero) and greater than 0, then include the below two fields too before the line_items.\n  \"discount\": \"\",\n  \"discount_type\": \"entity_level\",\n\nThe JSON body should be strictly in the below format based on number of items:\n\n{\n  \"customer_id\": \"\",\n  \"reference_number\",\n  \"date\": \"\",\n  \"due_date\": \"\",\n  \"line_items\": [\n    {\n      \"name\": \"item_name1\",\n      \"description\": \"description1\",\n      \"rate\": unit_price1,\n      \"quantity\": total count1\n    },\n    {\n      \"name\": \"item_name2\",\n      \"description\": \"description2\",\n      \"rate\": unit_price2,\n      \"quantity\": total count2\n    }\n  ]\n}\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -896,
+        1264
+      ],
+      "id": "ae85c98e-153f-44a0-a59b-bceeba4f197e",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -896,
+        1408
+      ],
+      "id": "d41de8b2-f33e-4582-9e9f-e765293b032b",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://invoice.zoho.com/api/v3/invoices?organization_id=907928134",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -592,
+        1264
+      ],
+      "id": "09a1a079-5ff9-44f8-94d0-6300ad4b2659",
+      "name": "Create Invoice2",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "=Makes an HTTP request to create the customer and returns the response data that includes customer_id.",
+        "method": "POST",
+        "url": "https://invoice.zoho.com/api/v3/contacts?organization_id=907928134",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('JSON', `So the value may be the company or client's name. Send body in below format\n{\n  \"contact_name\": \"Example Name\"\n}\n`, 'json') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -1632,
+        1088
+      ],
+      "id": "e6079d3c-5460-46d0-9802-29ed7a83c6ca",
+      "name": "Create Customer ID",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Makes an HTTP request to fetch the respective customer_id and returns the response data that includes the required customer's id.",
+        "url": "https://invoice.zoho.com/api/v3/contacts?organization_id=907928134",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -1488,
+        1088
+      ],
+      "id": "ed4d1662-5ea1-47e7-9ea2-cb5c85401976",
+      "name": "Get Customer ID",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "binaryData": true,
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        1264
+      ],
+      "id": "12cdf368-2a82-4cf6-8217-701074a78af6",
+      "name": "Send a document",
+      "webhookId": "1f617911-aa36-4b81-8f41-713eec1bab6b",
+      "credentials": {
+        "telegramApi": {
+          "id": "p4GWqpFCRLzIs0cf",
+          "name": "Invoice Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://invoice.zoho.com/api/v3/invoices/{{ $('Create Invoice2').item.json.invoice.invoice_id }}?accept=pdf\n",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -192,
+        1264
+      ],
+      "id": "7e6b0f9f-a52f-486d-9324-3195cb7c0796",
+      "name": "Get Invoice PDF",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parses AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parses AI Output": {
+      "main": [
+        [
+          {
+            "node": "Details-based Routing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Get a file1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Details-based Routing1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Get Invoice PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Send a text message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a file1": {
+      "main": [
+        [
+          {
+            "node": "Transcribe a recording1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe a recording1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields4": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Create Invoice2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Invoice2": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Customer ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Invoice PDF": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Qatar",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "4546db7b-3aca-406f-8977-b5096c969c06",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "00e2d86f18476fa48a0bbe70e4f34123227f25798f2099883f45d509f13b7aa9"
+  },
+  "id": "6Qht1b9siDMx91MG",
+  "tags": []
+}
