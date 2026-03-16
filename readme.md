@@ -209,6 +209,10 @@ Now go to your GitHub repository → **Actions** tab to watch the pipeline run!
 
 1. Edit your workflow in n8n
 2. Export it as JSON
-3. Replace `workflows/Auto Calendar.json` with the new export
-4. Commit and push to `main`
-5. The pipeline automatically builds, pushes, and deploys!
+3. Replace `workflows/Auto Calendar.json` with the new export (or add new JSON files for new workflows)
+4. **Remove any hardcoded credential IDs** from the JSON (the `"credentials": { "id": "..." }` blocks)
+5. Commit and push to `main`
+6. The pipeline automatically builds, pushes, and deploys!
+7. Open the n8n UI and assign credentials to any new workflow nodes
+
+> **Note:** Already-imported workflows are not re-imported on restart, so your credential assignments in the UI are preserved. Only **new** workflow files are detected and imported automatically.
